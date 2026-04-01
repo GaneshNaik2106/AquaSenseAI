@@ -6,7 +6,7 @@ import cv2
 import pandas as pd
 import streamlit as st
 from ultralytics import YOLO
-
+import time
 st.set_page_config(page_title="Marine Detection App", layout="wide")
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -35,11 +35,19 @@ def ensure_models_exist():
 
 
 # ✅ REAL-TIME VIDEO PROCESSING
+
+
 def process_video_realtime(input_path, model_names, conf, progress_bar):
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
         raise RuntimeError("Cannot open video")
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if not fps or fps <= 0:
+        fps = 25
+
+    delay = 1 / fps  # control playback speed
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_idx = 0
@@ -51,6 +59,8 @@ def process_video_realtime(input_path, model_names, conf, progress_bar):
     stats_placeholder = st.empty()
 
     while True:
+        start_time = time.time()
+
         ret, frame = cap.read()
         if not ret:
             break
@@ -85,7 +95,7 @@ def process_video_realtime(input_path, model_names, conf, progress_bar):
                     2,
                 )
 
-        # ✅ LIVE FRAME DISPLAY
+        # ✅ DISPLAY FRAME
         frame_placeholder.image(annotated, channels="BGR", width="stretch")
 
         # ✅ LIVE STATS
@@ -97,15 +107,20 @@ def process_video_realtime(input_path, model_names, conf, progress_bar):
 
             stats_placeholder.dataframe(df, width="stretch")
 
+        # ✅ PROGRESS
         frame_idx += 1
         if total_frames > 0:
             progress_bar.progress(min(frame_idx / total_frames, 1.0))
+
+        # ✅ FPS CONTROL (IMPORTANT)
+        elapsed = time.time() - start_time
+        sleep_time = max(0, delay - elapsed)
+        time.sleep(sleep_time)
 
     cap.release()
     progress_bar.progress(1.0)
 
     return counts
-
 
 # ✅ MAIN APP
 def app():
