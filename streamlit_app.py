@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 from ultralytics import YOLO
 import time
+
 st.set_page_config(page_title="Marine Detection App", layout="wide")
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -34,23 +35,36 @@ def ensure_models_exist():
     return [name for name, path in MODEL_PATHS.items() if not path.exists()]
 
 
-# ✅ REAL-TIME VIDEO PROCESSING
-
-
+# ✅ REAL-TIME + SAVE VIDEO
 def process_video_realtime(input_path, model_names, conf, progress_bar):
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
         raise RuntimeError("Cannot open video")
 
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     if not fps or fps <= 0:
         fps = 25
 
-    delay = 1 / fps  # control playback speed
-
+    delay = 1 / fps
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_idx = 0
+
+    # ✅ SAVE VIDEO (MP4)
+    output_path = "detected_output.mp4"
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+
+    writer = cv2.VideoWriter(
+        output_path,
+        fourcc,
+        fps,
+        (width, height)
+    )
+
+    if not writer.isOpened():
+        raise RuntimeError("Failed to open VideoWriter")
 
     models = {name: load_model(name) for name in model_names}
     counts = {}
@@ -95,8 +109,11 @@ def process_video_realtime(input_path, model_names, conf, progress_bar):
                     2,
                 )
 
-        # ✅ DISPLAY FRAME
+        # ✅ SHOW FRAME (REAL-TIME)
         frame_placeholder.image(annotated, channels="BGR", width="stretch")
+
+        # ✅ WRITE FRAME (FOR DOWNLOAD)
+        writer.write(annotated)
 
         # ✅ LIVE STATS
         if counts:
@@ -112,22 +129,25 @@ def process_video_realtime(input_path, model_names, conf, progress_bar):
         if total_frames > 0:
             progress_bar.progress(min(frame_idx / total_frames, 1.0))
 
-        # ✅ FPS CONTROL (IMPORTANT)
+        # ✅ FPS CONTROL
         elapsed = time.time() - start_time
-        sleep_time = max(0, delay - elapsed)
-        time.sleep(sleep_time)
+        time.sleep(max(0, delay - elapsed))
 
     cap.release()
+    writer.release()
     progress_bar.progress(1.0)
 
-    return counts
+    return output_path, counts
+
 
 # ✅ MAIN APP
 def app():
-    st.title("🌊 Marine Video Object Detection (Real-Time)")
+    st.title("🌊 Marine Video Object Detection (Real-Time + Download)")
 
     if "counts" not in st.session_state:
         st.session_state.counts = None
+    if "video_bytes" not in st.session_state:
+        st.session_state.video_bytes = None
 
     # Check models
     missing = ensure_models_exist()
@@ -163,18 +183,33 @@ def app():
 
                 progress = st.progress(0.0)
 
-                with st.spinner("Running real-time detection..."):
-                    counts = process_video_realtime(
+                with st.spinner("Running detection..."):
+                    output_path, counts = process_video_realtime(
                         str(input_path),
                         active_models,
                         conf,
                         progress,
                     )
 
+                # ✅ READ VIDEO FOR DOWNLOAD
+                with open(output_path, "rb") as f:
+                    video_bytes = f.read()
+
                 st.session_state.counts = counts
+                st.session_state.video_bytes = video_bytes
+
                 st.success("Detection complete!")
 
-    # Final summary
+    # ✅ DOWNLOAD BUTTON
+    if st.session_state.video_bytes:
+        st.download_button(
+            label="⬇ Download Detected Video",
+            data=st.session_state.video_bytes,
+            file_name="detected_output.mp4",
+            mime="video/mp4"
+        )
+
+    # ✅ FINAL SUMMARY
     if st.session_state.counts:
         st.subheader("📊 Final Detection Summary")
 
